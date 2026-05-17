@@ -133,20 +133,48 @@ def parse_input_json(txt):
         st.error(f"Invalid JSON: {e}")
         return None
 
-uploaded_df = None
+if 'uploaded_df' not in st.session_state:
+    st.session_state.uploaded_df = None
+
 if input_method.startswith("Paste"):
-    txt = st.text_area("Transaction JSON", height=200)
-    if st.button("Load JSON"):
+    txt = st.text_area(
+        "Transaction JSON",
+        height=200,
+        key="json_input",
+        placeholder="""{
+  "transaction_amount": 1250.50,
+  "login_attempts": 2,
+  "device_risk_score": 45.0,
+  "transfer_frequency": 3,
+  "anomaly_score": 0.12,
+  "account_age_days": 540,
+  "transaction_time_hour": 21,
+  "failed_transactions_last_30d": 1,
+  "avg_monthly_balance": 8200.0,
+  "daily_transaction_count": 4,
+  "geo_distance_km": 120.5,
+  "session_duration_minutes": 8.2,
+  "transaction_velocity_score": 0.34,
+  "payment_channel": "POS Terminal",
+  "authentication_type": "PIN",
+  "card_present_flag": 1,
+  "international_transaction_flag": 0,
+  "suspicious_ip_flag": 0
+}"""
+    )
+    if st.button("Load JSON", key="load_json"):
         df = parse_input_json(txt)
-        uploaded_df = df
+        st.session_state.uploaded_df = df
+    uploaded_df = st.session_state.uploaded_df
 else:
-    uploaded = st.file_uploader("Upload CSV", type=["csv"]) 
+    uploaded = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded is not None:
         try:
             df = pd.read_csv(uploaded)
-            uploaded_df = df
+            st.session_state.uploaded_df = df
         except Exception as e:
             st.error(f"Failed to read CSV: {e}")
+    uploaded_df = st.session_state.uploaded_df
 
 if uploaded_df is not None:
     st.write("Input preview:")
@@ -211,7 +239,19 @@ if uploaded_df is not None:
                                 df[col] = enc.transform(df[col].astype(str))
                                 df[col] = pd.to_numeric(df[col])
                                 continue
-                            except Exception as e:
+                            except ValueError as e:
+                                # Handle unseen labels in saved LabelEncoder by mapping them to -1
+                                if hasattr(enc, 'classes_'):
+                                    mapping = {str(value): idx for idx, value in enumerate(enc.classes_)}
+                                    original_values = df[col].astype(str)
+                                    df[col] = original_values.map(mapping).fillna(-1).astype(int)
+                                    unseen = original_values[~original_values.isin(enc.classes_)].unique()
+                                    st.warning(
+                                        f"Saved encoder for {col} encountered unseen labels {list(unseen)}. "
+                                        "These values were mapped to -1 to preserve the training encoding for known labels. "
+                                        "If this prediction should use a new category, retrain and save a new encoder."
+                                    )
+                                    continue
                                 st.warning(f"Saved encoder for {col} failed to transform values: {e}; will try fallback encoding.")
 
                     # Try to coerce to numeric (for numeric strings)
